@@ -1,26 +1,38 @@
-# Dienstplan — planning des infirmiers
+# Déploiement du backend (Google Apps Script)
 
-## Fichiers
+Ce dossier contient `Code.gs`, le backend qui gère :
+- les demandes d'échange de service (créer / lister / accepter)
+- les notifications (envoyées aux deux collègues + à toute la station lors d'une acceptation)
+- l'import d'un planning Excel par l'admin (écrit dans le Google Sheet)
 
-- `index.html` — page principale : connexion (nom + station) puis planning filtré, calendrier, échange de service et notifications.
-- `admin.html` — page réservée (login `firas` / station `007`) pour importer un planning Excel vers le Google Sheet.
-- `config.js` — à remplir : `CSV_URL` (Google Sheet publié en CSV), `WEBAPP_URL` (Apps Script), `ADMIN_KEY`.
-- `style.css` — styles partagés.
-- `apps-script/Code.gs` + `apps-script/README.md` — backend Google Apps Script (échanges, notifications, import Excel). **À déployer séparément**, voir le README de ce dossier.
+## Étapes
 
-## Ce qui a changé par rapport à la version précédente
+1. Ouvre ton Google Sheet (celui déjà publié en CSV pour `CSV_URL`).
+2. Ajoute une colonne **Station** si elle n'existe pas déjà, à côté de Name/Code, sur l'onglet utilisé par le site (par défaut nommé `Planning` — adapte `SHEET_PLANNING` dans `Code.gs` si ton onglet a un autre nom).
+3. Dans le Sheet : **Extensions → Apps Script**.
+4. Supprime le contenu par défaut et colle celui de `Code.gs`.
+5. En haut du fichier, remplis :
+   - `SPREADSHEET_ID` : l'ID du Google Sheet (dans l'URL, entre `/d/` et `/edit`).
+   - `SHEET_PLANNING` : le nom exact de l'onglet du planning (si différent de `Planning`).
+   - `ADMIN_KEY` : choisis une clé secrète, et remets **exactement la même** dans `config.js` (`CONFIG.ADMIN_KEY`) côté site.
+6. **Déployer → Nouveau déploiement** :
+   - Type : *Application Web*
+   - Exécuter en tant que : *Moi*
+   - Qui a accès : *Tout le monde*
+7. Autorise les permissions demandées (accès à ta feuille de calcul).
+8. Copie l'URL `.../exec` obtenue et colle-la dans `config.js` → `CONFIG.WEBAPP_URL`.
 
-1. **Page de connexion** : l'infirmier entre prénom, nom et station → il est directement redirigé vers son planning filtré. Si aucune correspondance n'est trouvée dans le Google Sheet, un message l'invite à vérifier son nom et sa station.
-2. **Login admin** : nom `firas` + station `007` ouvre `admin.html`, la page d'import de planning Excel (les lignes sont écrites dans le Google Sheet pour la station choisie, en remplaçant les anciennes lignes de cette station).
-3. **Échange de service** : chaque infirmier peut proposer un de ses services à l'échange ; ses collègues de la même station voient la demande et peuvent l'accepter.
-4. **Notifications** : à chaque acceptation d'échange, une notification est envoyée aux deux collègues concernés et à tous les utilisateurs de la station (visible via la cloche 🔔 au chargement de la page — voir la limite expliquée dans `apps-script/README.md`).
+## Onglets créés automatiquement
 
-## Prérequis côté Google Sheet
+- `Echanges` : historique des demandes d'échange (statut `open`/`accepted`).
+- `Notifications` : une ligne par notification, avec `Type` = `user` (nom exact) ou `station` (nom de station), lue par le site au chargement (pas de push en temps réel — la personne doit ouvrir/recharger la page).
 
-Le Google Sheet source doit avoir une colonne **Station** (ou **Service**) à côté des colonnes Date/Start/End/Name/Code déjà utilisées, pour que la station de chaque service soit connue.
+## Sécurité — à savoir
 
-## Mise en route
+- Le lien `/exec` est accessible publiquement dès qu'on le connaît : c'est le fonctionnement standard d'Apps Script. L'import de planning est protégé par `ADMIN_KEY`, mais ce n'est qu'une protection légère (clé partagée dans le code front) — ne partage pas ce lien publiquement.
+- Le login "admin" (nom `firas` / station `007`) côté site n'est qu'un filtre d'écran : c'est bien `ADMIN_KEY` côté Apps Script qui protège réellement l'écriture dans le Sheet.
+- Pour une vraie authentification (mot de passe par utilisateur, etc.), il faudrait passer à un backend avec comptes utilisateurs — au-delà de ce que Google Sheets + Apps Script permet simplement.
 
-1. Déployer `apps-script/Code.gs` (voir `apps-script/README.md`) → récupérer l'URL `/exec`.
-2. Remplir `config.js` : `CSV_URL`, `WEBAPP_URL`, `ADMIN_KEY` (même valeur que dans `Code.gs`).
-3. Héberger les fichiers (GitHub Pages, Netlify, etc.) — pas de serveur nécessaire côté front.
+## Limite des notifications
+
+Comme il n'y a pas de serveur qui pousse des notifications en temps réel (pas de web push), la cloche 🔔 du site se met à jour **quand la page est chargée ou rechargée**, pas instantanément quand un collègue accepte un échange.
