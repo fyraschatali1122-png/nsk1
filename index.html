@@ -1,0 +1,516 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Dienstplan</title>
+
+  <link rel="stylesheet" href="style.css" />
+  <style>
+    #loginScreen{min-height:100vh;display:flex;align-items:center;justify-content:center}
+    .login-card{max-width:420px;width:100%}
+    .login-card h1{margin-top:0}
+    .field{display:flex;flex-direction:column;gap:6px;margin-bottom:12px}
+    .field input{width:100%}
+    .error-box{background:#3a1414;border:1px solid #7a2323;color:#ffb4b4;border-radius:10px;padding:10px 12px;margin-top:10px;display:none}
+    #appScreen{display:none}
+    .topbar{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+    .topbar .who{font-weight:600}
+    .topbar .muted-sm{color:var(--muted);font-size:.85rem}
+    .bell-wrap{position:relative}
+    .bell-btn{position:relative;background:#0c0f15;border:1px solid var(--border)}
+    .bell-count{position:absolute;top:-6px;right:-6px;background:#ff4d4f;color:#fff;border-radius:999px;font-size:.7rem;padding:1px 6px;font-weight:700}
+    .bell-dropdown{position:absolute;right:0;top:44px;width:320px;max-height:360px;overflow:auto;background:var(--card);border:1px solid var(--border);border-radius:12px;padding:10px;box-shadow:0 10px 24px rgba(0,0,0,.4);z-index:20;display:none}
+    .bell-dropdown .notif-item{padding:8px;border-bottom:1px solid var(--border);font-size:.9rem}
+    .bell-dropdown .notif-item:last-child{border-bottom:none}
+    .bell-dropdown .notif-date{color:var(--muted);font-size:.75rem;margin-top:2px}
+    .shift-row{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)}
+    .shift-row:last-child{border-bottom:none}
+    .req-row{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);flex-wrap:wrap}
+    .req-row:last-child{border-bottom:none}
+    .req-status{font-size:.75rem;padding:2px 8px;border-radius:999px;border:1px solid var(--border)}
+    .req-status.open{color:#36d17a;border-color:#1e5b2b}
+    .req-status.mine{color:#ff9f3a;border-color:#6c4b1a}
+    #calendar .fc{height:700px}
+    .status{white-space:pre-wrap}
+    .hidden{display:none !important}
+  </style>
+
+  <link href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.11/index.global.min.css" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.11/index.global.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fullcalendar/core@6.1.11/locales-all.global.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+
+  <script src="config.js"></script>
+</head>
+<body>
+
+  <section id="loginScreen">
+    <div class="card login-card">
+      <h1>📅 Mon planning</h1>
+      <p class="muted">Entrez votre nom, prénom et votre station pour accéder directement à votre planning.</p>
+
+      <div class="field">
+        <label for="lPrenom">Prénom</label>
+        <input id="lPrenom" type="text" autocomplete="given-name" />
+      </div>
+      <div class="field">
+        <label for="lNom">Nom</label>
+        <input id="lNom" type="text" autocomplete="family-name" />
+      </div>
+      <div class="field">
+        <label for="lStation">Station / Service</label>
+        <input id="lStation" type="text" />
+      </div>
+
+      <button id="btnLogin" style="width:100%">Voir mon planning</button>
+      <div id="loginError" class="error-box"></div>
+      <p id="loginStatus" class="muted-sm" style="margin-top:10px"></p>
+    </div>
+  </section>
+
+  <div id="appScreen" class="container">
+
+    <header class="topbar card" style="margin-bottom:16px">
+      <div>
+        <div class="who" id="whoAmI"></div>
+        <div class="muted-sm" id="whoStation"></div>
+      </div>
+      <div class="row" style="align-items:center;gap:10px">
+        <div class="bell-wrap">
+          <button id="btnBell" class="bell-btn" title="Notifications">
+            🔔
+            <span id="bellCount" class="bell-count hidden">0</span>
+          </button>
+          <div id="bellDropdown" class="bell-dropdown">
+            <strong>Notifications</strong>
+            <div id="notifList" style="margin-top:8px"></div>
+          </div>
+        </div>
+        <button id="btnLogout" class="secondary">Se déconnecter</button>
+      </div>
+    </header>
+
+    <section><div id="status" class="card status" style="display:none"></div></section>
+
+    <section class="card" style="margin-bottom:16px">
+      <div class="controls" style="margin-bottom:8px">
+        <div class="row">
+          <label>Nom</label>
+          <input id="qName" type="text" placeholder="Nom…" />
+        </div>
+        <div class="row">
+          <label>Service</label>
+          <select id="qType">
+            <option value="">(Tous)</option>
+            <option value="Frühschicht">Frühschicht</option>
+            <option value="Spätschicht">Spätschicht</option>
+            <option value="Nachtschicht">Nachtschicht</option>
+            <option value="Urlaub">Urlaub</option>
+            <option value="Frei">Frei</option>
+          </select>
+        </div>
+        <div class="row">
+          <label>Date</label>
+          <input id="qDate" type="date" />
+        </div>
+        <div class="row">
+          <label>&nbsp;</label>
+          <div class="row" style="gap:8px">
+            <button id="btnFilter">Filtrer</button>
+            <button id="btnMine" class="secondary">Mon planning</button>
+            <button id="btnAllStation" class="secondary">Toute la station</button>
+            <button id="btnReset" class="secondary">Réinitialiser</button>
+          </div>
+        </div>
+      </div>
+      <div class="row">
+        <button id="btnShowList" class="secondary">Liste</button>
+        <button id="btnShowCal">Calendrier</button>
+      </div>
+    </section>
+
+    <section id="calendarSection" class="card" style="display:none;margin-bottom:16px">
+      <div id="calendar"></div>
+    </section>
+
+    <section id="listSection" class="card" style="margin-bottom:16px">
+      <h2>Résultats</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Date</th><th>Début</th><th>Fin</th><th>Nom</th><th>Station</th><th>Code</th></tr></thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+      <h3>Équipe du jour</h3>
+      <ul id="teamList" class="list"></ul>
+    </section>
+
+    <section class="card" style="margin-bottom:16px">
+      <h2>🔁 Échange de service</h2>
+      <p class="muted">Proposez un de vos services à l'échange. Vos collègues de la même station pourront l'accepter.</p>
+
+      <h3>Mes prochains services</h3>
+      <div id="myShifts"></div>
+
+      <h3 style="margin-top:18px">Demande manuelle</h3>
+      <div class="row">
+        <input id="wDate" type="date" />
+        <input id="wNote" type="text" placeholder="Remarque (optionnel)" style="flex:1;min-width:200px" />
+        <button id="wSend">Proposer l'échange</button>
+      </div>
+
+      <h3 style="margin-top:18px">Demandes ouvertes — ma station</h3>
+      <div id="wList"></div>
+    </section>
+
+  </div>
+
+  <script>
+  const $ = s => document.querySelector(s);
+  const CSV_URL = CONFIG.CSV_URL;
+  const WEBAPP_URL = CONFIG.WEBAPP_URL;
+
+  function showStatus(msg){ const b=$("#status"); b.style.display=''; b.textContent=msg; }
+  function hideStatus(){ const b=$("#status"); b.style.display='none'; b.textContent=""; }
+  function padTime(t){ if(!t) return ""; const p=String(t).split(":"); return (p[0]||"").padStart(2,"0")+":"+((p[1]||"00").padStart(2,"0")); }
+  function mapCode(code){
+    const c=String(code||"").toUpperCase().trim();
+    if(c==="EF"||c==="FN") return "Frühschicht";
+    if(c==="ES"||c==="SN") return "Spätschicht";
+    if(c==="K2N"||c==="AK2"||c==="AKN") return "Nachtschicht";
+    if(c==="U"||c==="O") return "Urlaub";
+    if(c==="AV") return "Frei";
+    return c || "";
+  }
+  function sameDay(a,b){ return a.getFullYear()==b.getFullYear()&&a.getMonth()==b.getMonth()&&a.getDate()==b.getDate(); }
+  function normalize(s){
+    return String(s||"").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"");
+  }
+  function todayISO(){ const d=new Date(); return d.toISOString().slice(0,10); }
+
+  let ALL = [];
+  let calendar = null;
+  let session = null;
+
+  async function loadData(){
+    if(!CSV_URL || !CSV_URL.includes("output=csv")){
+      showStatus("⚠️ CSV_URL manquant ou invalide dans config.js.");
+      return;
+    }
+    showStatus("⏳ Chargement du planning…");
+    const res = await fetch(CSV_URL, { cache:"no-store" }).catch(()=>null);
+    if(!res || !res.ok){
+      showStatus("❌ Impossible de lire le Google Sheet. Vérifiez le lien CSV (Publier sur le web).");
+      return;
+    }
+    const text = await res.text();
+    const parsed = Papa.parse(text, { header:true, skipEmptyLines:true });
+    const rows = parsed.data;
+    const key = (o, wanted) => Object.keys(o).find(k => k && k.toLowerCase().trim() === wanted.toLowerCase().trim()) || null;
+
+    ALL = rows.map(r=>{
+      const kDate  = key(r,"date")  || key(r,"datum");
+      const kStart = key(r,"start") || key(r,"beginn");
+      const kEnd   = key(r,"end")   || key(r,"ende");
+      const kName  = key(r,"name");
+      const kCode  = key(r,"code") || key(r,"dienst");
+      const kStation = key(r,"station") || key(r,"service") || key(r,"abteilung");
+
+      const date  = kDate  ? String(r[kDate]).trim()  : "";
+      const start = kStart ? padTime(String(r[kStart]).trim()) : "";
+      const end   = kEnd   ? padTime(String(r[kEnd]).trim())   : "";
+      const name  = kName  ? String(r[kName]).trim()  : "";
+      const code  = kCode  ? String(r[kCode]).trim()  : "";
+      const station = kStation ? String(r[kStation]).trim() : "";
+
+      const schicht = mapCode(code);
+      const startDt = start ? new Date(`${date}T${start}`) : null;
+      let   endDt   = end   ? new Date(`${date}T${end}`)   : null;
+      if(startDt && endDt && endDt<=startDt) endDt = new Date(endDt.getTime()+24*3600*1000);
+
+      return { date,start,end,name,code:code||schicht,schicht,station,startDt,endDt };
+    }).filter(x => x.name && x.date);
+
+    hideStatus();
+  }
+
+  function findMatches(prenom, nom, station){
+    const nPrenom = normalize(prenom), nNom = normalize(nom), nStation = normalize(station);
+    const full1 = normalize(`${prenom} ${nom}`), full2 = normalize(`${nom} ${prenom}`);
+    return ALL.filter(r=>{
+      const rn = normalize(r.name);
+      const nameOk = rn.includes(nNom) || rn.includes(full1) || rn.includes(full2) || (nPrenom && rn.includes(nPrenom));
+      const stationOk = nStation ? normalize(r.station).includes(nStation) : true;
+      return nameOk && stationOk;
+    });
+  }
+
+  async function attemptLogin(){
+    const prenom = $("#lPrenom").value.trim();
+    const nom = $("#lNom").value.trim();
+    const station = $("#lStation").value.trim();
+    const errBox = $("#loginError");
+    errBox.style.display = 'none';
+
+    if(!nom || !station){
+      errBox.textContent = "Veuillez entrer au moins votre nom et votre station.";
+      errBox.style.display = '';
+      return;
+    }
+
+    if((normalize(nom) === normalize(CONFIG.ADMIN_NAME) || normalize(prenom) === normalize(CONFIG.ADMIN_NAME))
+        && normalize(station) === normalize(CONFIG.ADMIN_STATION)){
+      window.location.href = "admin.html";
+      return;
+    }
+
+    $("#loginStatus").textContent = "Vérification…";
+    if(ALL.length === 0) await loadData();
+    $("#loginStatus").textContent = "";
+
+    const matches = findMatches(prenom, nom, station);
+    if(matches.length === 0){
+      errBox.textContent = "⚠️ Vérifiez votre nom et votre station : aucune correspondance trouvée dans le planning.";
+      errBox.style.display = '';
+      return;
+    }
+
+    session = { name: matches[0].name, station: matches[0].station || station };
+    sessionStorage.setItem("dp_session", JSON.stringify(session));
+    enterApp();
+  }
+
+  function logout(){
+    sessionStorage.removeItem("dp_session");
+    session = null;
+    $("#appScreen").style.display = "none";
+    $("#loginScreen").style.display = "flex";
+  }
+
+  function enterApp(){
+    $("#loginScreen").style.display = "none";
+    $("#appScreen").style.display = "block";
+    $("#whoAmI").textContent = `👋 ${session.name}`;
+    $("#whoStation").textContent = session.station ? `Station : ${session.station}` : "";
+    $("#qName").value = session.name;
+    applyFilters();
+    renderMyShifts();
+    loadOpenRequests();
+    loadNotifications();
+  }
+
+  function renderList(list){
+    const tb=$("#tbody"); tb.innerHTML="";
+    list.slice().sort((a,b)=>(a.startDt?.getTime()||0)-(b.startDt?.getTime()||0)||a.name.localeCompare(b.name)).forEach(r=>{
+      const tr=document.createElement("tr");
+      tr.innerHTML=`<td>${r.date}</td><td>${r.start||""}</td><td>${r.end||""}</td><td>${r.name}</td><td>${r.station||""}</td><td>${r.code||""}</td>`;
+      tb.appendChild(tr);
+    });
+
+    const ul=$("#teamList"); ul.innerHTML="";
+    const val=$("#qDate").value;
+    if(val){
+      const d=new Date(val);
+      const day=list.filter(r=> r.startDt ? sameDay(r.startDt,d) : (r.date===val));
+      if(!day.length){ ul.innerHTML="<li>Aucun service ce jour.</li>"; return; }
+      const byType = day.reduce((acc,r)=>{ (acc[r.schicht||"-"] ||= []).push(r.name); return acc; },{});
+      Object.keys(byType).sort().forEach(k=>{
+        const li=document.createElement("li"); li.textContent=`${k}: ${[...new Set(byType[k])].sort().join(", ")}`;
+        ul.appendChild(li);
+      });
+    }
+  }
+
+  function buildEvents(list){
+    return list.map(r=>{
+      const title = `${r.name} (${r.code||""})`;
+      if(!r.startDt) return { title, start:r.date, allDay:true };
+      const evt = { title, start:r.startDt.toISOString() };
+      if(r.endDt && !isNaN(r.endDt)) evt.end = r.endDt.toISOString();
+      return evt;
+    });
+  }
+  function renderCalendar(list){
+    const el=$("#calendar");
+    const events=buildEvents(list);
+    if(!calendar){
+      calendar = new FullCalendar.Calendar(el, {
+        initialView:'dayGridMonth', locale:'fr', firstDay:1,
+        headerToolbar:{ left:'prev,next today', center:'title', right:'dayGridMonth,timeGridWeek,timeGridDay' },
+        events
+      });
+      calendar.render();
+    }else{
+      calendar.removeAllEvents();
+      calendar.addEventSource(events);
+      calendar.render();
+    }
+  }
+
+  function applyFilters(){
+    const qName=$("#qName").value.trim().toLowerCase();
+    const qType=$("#qType").value;
+    const qDate=$("#qDate").value;
+
+    let list=ALL;
+    if(qName) list=list.filter(r => (r.name||"").toLowerCase().includes(qName));
+    if(qType) list=list.filter(r => r.schicht===qType || r.code===qType);
+    if(qDate){
+      const d=new Date(qDate);
+      list=list.filter(r => r.startDt ? sameDay(r.startDt,d) : (r.date===qDate));
+    }
+    renderList(list);
+    if($("#calendarSection").style.display!=="none") renderCalendar(list);
+  }
+
+  function renderMyShifts(){
+    const box = $("#myShifts");
+    const today = todayISO();
+    const mine = ALL.filter(r => normalize(r.name)===normalize(session.name) && r.date >= today)
+                    .sort((a,b)=> (a.startDt?.getTime()||0)-(b.startDt?.getTime()||0))
+                    .slice(0, 20);
+    if(!mine.length){ box.innerHTML = "<p class='muted-sm'>Aucun service à venir trouvé.</p>"; return; }
+    box.innerHTML = "";
+    mine.forEach(r=>{
+      const row = document.createElement("div");
+      row.className = "shift-row";
+      row.innerHTML = `<span>${r.date} — ${r.code||r.schicht||""}</span>`;
+      const btn = document.createElement("button");
+      btn.className = "secondary";
+      btn.textContent = "Proposer l'échange";
+      btn.addEventListener("click", ()=> proposeExchange(r.date, `Échange proposé pour le service du ${r.date}`));
+      row.appendChild(btn);
+      box.appendChild(row);
+    });
+  }
+
+  async function proposeExchange(date, note){
+    if(!WEBAPP_URL){ alert("Système d'échange non configuré."); return; }
+    const resp = await fetch(WEBAPP_URL, {
+      method:"POST", headers:{ "Content-Type":"application/json" },
+      body: JSON.stringify({ action:"create", name:session.name, station:session.station, date, note })
+    }).then(r=>r.json()).catch(()=>null);
+    if(!resp || resp.ok===false){ alert("Erreur lors de l'envoi de la demande."); return; }
+    alert("Demande d'échange envoyée.");
+    loadOpenRequests();
+  }
+
+  $("#wSend").addEventListener("click", ()=>{
+    const date=$("#wDate").value;
+    const note=$("#wNote").value.trim();
+    if(!date){ alert("Choisissez une date."); return; }
+    proposeExchange(date, note);
+    $("#wDate").value=""; $("#wNote").value="";
+  });
+
+  async function loadOpenRequests(){
+    if(!WEBAPP_URL) return;
+    try{
+      const r = await fetch(`${WEBAPP_URL}?action=requests`);
+      const data = await r.json();
+      const items = Array.isArray(data) ? data : (data.ok ? (data.items||[]) : []);
+      renderOpenRequests(items);
+    }catch(e){ console.error(e); }
+  }
+
+  function renderOpenRequests(items){
+    const box = $("#wList");
+    const mine = items.filter(it =>
+      String(it.status||"").toLowerCase()==="open" &&
+      normalize(it.station) === normalize(session.station)
+    );
+    if(!mine.length){ box.innerHTML = "<p class='muted-sm'>Aucune demande ouverte pour votre station.</p>"; return; }
+    box.innerHTML = "";
+    mine.forEach(it=>{
+      const isMine = normalize(it.name) === normalize(session.name);
+      const row = document.createElement("div");
+      row.className = "req-row";
+      row.innerHTML = `
+        <span>${String(it.date).slice(0,10)} — ${it.name}${it.note?` (${it.note})`:""}
+          <span class="req-status ${isMine?'mine':'open'}">${isMine?'ma demande':'ouverte'}</span>
+        </span>`;
+      if(!isMine){
+        const btn = document.createElement("button");
+        btn.textContent = "Accepter";
+        btn.addEventListener("click", ()=> acceptRequest(it.id));
+        row.appendChild(btn);
+      }
+      box.appendChild(row);
+    });
+  }
+
+  async function acceptRequest(id){
+    if(!confirm("Confirmer l'acceptation de cet échange ?")) return;
+    const resp = await fetch(WEBAPP_URL, {
+      method:"POST", headers:{ "Content-Type":"application/json" },
+      body: JSON.stringify({ action:"accept", id, accepterName:session.name, accepterStation:session.station })
+    }).then(r=>r.json()).catch(()=>null);
+    if(!resp || resp.ok===false){ alert("Erreur lors de l'acceptation."); return; }
+    alert("Échange accepté ! Des notifications ont été envoyées.");
+    loadOpenRequests();
+    loadNotifications();
+  }
+
+  async function loadNotifications(){
+    if(!WEBAPP_URL) return;
+    try{
+      const url = `${WEBAPP_URL}?action=notifications&name=${encodeURIComponent(session.name)}&station=${encodeURIComponent(session.station)}`;
+      const r = await fetch(url);
+      const data = await r.json();
+      const items = data.ok ? (data.items||[]) : [];
+      renderNotifications(items);
+    }catch(e){ console.error(e); }
+  }
+
+  function renderNotifications(items){
+    const list = $("#notifList");
+    const countEl = $("#bellCount");
+    if(!items.length){
+      list.innerHTML = "<p class='muted-sm'>Aucune notification.</p>";
+      countEl.classList.add("hidden");
+      return;
+    }
+    countEl.textContent = items.length;
+    countEl.classList.remove("hidden");
+    list.innerHTML = "";
+    items.slice(0,30).forEach(n=>{
+      const div = document.createElement("div");
+      div.className = "notif-item";
+      div.innerHTML = `<div>${n.message}</div><div class="notif-date">${String(n.createdAt||"").slice(0,16).replace("T"," ")}</div>`;
+      list.appendChild(div);
+    });
+  }
+
+  $("#btnBell").addEventListener("click", ()=>{
+    const dd = $("#bellDropdown");
+    dd.style.display = dd.style.display === 'block' ? 'none' : 'block';
+  });
+  document.addEventListener("click", (e)=>{
+    if(!e.target.closest(".bell-wrap")) $("#bellDropdown").style.display = 'none';
+  });
+
+  $("#btnLogin").addEventListener("click", attemptLogin);
+  $("#btnLogout").addEventListener("click", logout);
+  $("#btnFilter").addEventListener("click", applyFilters);
+  $("#btnReset").addEventListener("click", ()=>{ $("#qName").value=""; $("#qType").value=""; $("#qDate").value=""; applyFilters(); });
+  $("#btnMine").addEventListener("click", ()=>{ $("#qName").value=session.name; applyFilters(); });
+  $("#btnAllStation").addEventListener("click", ()=>{
+    $("#qName").value="";
+    let list = ALL.filter(r => normalize(r.station)===normalize(session.station));
+    renderList(list);
+    if($("#calendarSection").style.display!=="none") renderCalendar(list);
+  });
+  $("#btnShowCal").addEventListener("click", ()=>{ $("#calendarSection").style.display=""; $("#listSection").style.display="none"; renderCalendar(ALL); });
+  $("#btnShowList").addEventListener("click", ()=>{ $("#calendarSection").style.display="none"; $("#listSection").style.display=""; });
+
+  (async function init(){
+    await loadData();
+    const saved = sessionStorage.getItem("dp_session");
+    if(saved){
+      try{ session = JSON.parse(saved); enterApp(); return; }catch(e){}
+    }
+  })();
+  </script>
+</body>
+</html>

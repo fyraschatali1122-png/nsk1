@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Admin — Import planning</title>
+  <link rel="stylesheet" href="style.css" />
+  <style>
+    #gate{min-height:100vh;display:flex;align-items:center;justify-content:center}
+    .gate-card{max-width:380px;width:100%}
+    #panel{display:none}
+    .field{display:flex;flex-direction:column;gap:6px;margin-bottom:12px}
+    .error-box{background:#3a1414;border:1px solid #7a2323;color:#ffb4b4;border-radius:10px;padding:10px 12px;margin-top:10px;display:none}
+    .ok-box{background:#0f2f1a;border:1px solid #1e5b2b;color:#9be8ab;border-radius:10px;padding:10px 12px;margin-top:10px;display:none}
+  </style>
+  <script src="config.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+
+  <section id="gate">
+    <div class="card gate-card">
+      <h1>🔒 Accès admin</h1>
+      <p class="muted">Réservé à Firas.</p>
+      <div class="field">
+        <label>Nom</label>
+        <input id="gName" type="text" />
+      </div>
+      <div class="field">
+        <label>Station</label>
+        <input id="gStation" type="text" />
+      </div>
+      <button id="btnGate" style="width:100%">Entrer</button>
+      <div id="gateError" class="error-box"></div>
+      <p class="muted-sm" style="margin-top:10px"><a href="index.html">← Retour au planning</a></p>
+    </div>
+  </section>
+
+  <div id="panel" class="container">
+    <header class="card" style="margin-bottom:16px">
+      <h1>📥 Import d'un planning Excel</h1>
+      <p class="muted">Choisissez un fichier Excel (.xlsx), la station cible, puis publiez sur le Google Sheet.</p>
+    </header>
+
+    <section class="card" style="margin-bottom:16px">
+      <div class="controls" style="margin-bottom:8px">
+        <div class="row">
+          <label>Fichier Excel</label>
+          <input id="fileInput" type="file" accept=".xlsx,.xls,.csv" />
+        </div>
+        <div class="row">
+          <label>Station cible</label>
+          <input id="targetStation" type="text" placeholder="ex: A1, Urgences…" />
+        </div>
+      </div>
+      <p class="muted-sm">Colonnes attendues (insensible à la casse) : <strong>Date, Start/Beginn, End/Ende, Name, Code/Dienst</strong>. La colonne Station est optionnelle — si absente, la station saisie ci-dessus sera appliquée à toutes les lignes.</p>
+    </section>
+
+    <section class="card" style="margin-bottom:16px">
+      <h2>Aperçu (<span id="rowCount">0</span> lignes)</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Date</th><th>Début</th><th>Fin</th><th>Nom</th><th>Station</th><th>Code</th></tr></thead>
+          <tbody id="previewBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card">
+      <button id="btnPublish" disabled>Publier sur le Google Sheet</button>
+      <span id="publishStatus" class="muted-sm" style="margin-left:10px"></span>
+      <div id="publishError" class="error-box"></div>
+      <div id="publishOk" class="ok-box"></div>
+    </section>
+  </div>
+
+  <script>
+    const $ = s => document.querySelector(s);
+    function normalize(s){ return String(s||"").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,""); }
+
+    // ---- Verrou d'accès (contrôle côté écran uniquement) ----
+    $("#btnGate").addEventListener("click", ()=>{
+      const name = $("#gName").value.trim();
+      const station = $("#gStation").value.trim();
+      if(normalize(name) === normalize(CONFIG.ADMIN_NAME) && normalize(station) === normalize(CONFIG.ADMIN_STATION)){
+        $("#gate").style.display = "none";
+        $("#panel").style.display = "block";
+      } else {
+        const e = $("#gateError");
+        e.textContent = "Identifiants incorrects.";
+        e.style.display = "";
+      }
+    });
+
+    // ---- Lecture du fichier Excel ----
+    let parsedRows = [];
+
+    $("#fileInput").addEventListener("change", async (ev)=>{
+      const file = ev.target.files[0];
+      if(!file) return;
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, { type: "array" });
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      const json = XLSX.utils.sheet_to_json(sheet, { defval: "" });
+
+      const key = (o, wanted) => Object.keys(o).find(k => k && k.toLowerCase().trim() === wanted.toLowerCase().trim()) || null;
+      const targetStation = $("#targetStation").value.trim();
+
+      parsedRows = json.map(r=>{
+        const kDate  = key(r,"date")  || key(r,"datum");
+        const kStart = key(r,"start") || key(r,"beginn");
+        const kEnd   = key(r,"end")   || key(r,"ende");
+        const kName  = key(r,"name");
+        const kCode  = key(r,"code") || key(r,"dienst");
+        const kStation = key(r,"station") || key(r,"service") || key(r,"abteilung");
+
+        return {
+          date: kDate ? String(r[kDate]).trim() : "",
+          start: kStart ? String(r[kStart]).trim() : "",
+          end: kEnd ? String(r[kEnd]).trim() : "",
+          name: kName ? String(r[kName]).trim() : "",
+          code: kCode ? String(r[kCode]).trim() : "",
+          station: (kStation && String(r[kStation]).trim()) || targetStation
+        };
+      }).filter(r => r.name && r.date);
+
+      renderPreview();
+    });
+
+    $("#targetStation").addEventListener("input", ()=>{
+      // Réapplique la station cible aux lignes qui n'ont pas leur propre station
+      const targetStation = $("#targetStation").value.trim();
+      parsedRows = parsedRows.map(r => ({ ...r, station: r.station || targetStation }));
+      renderPreview();
+    });
+
+    function renderPreview(){
+      const tb = $("#previewBody");
+      tb.innerHTML = "";
+      parsedRows.forEach(r=>{
+        const tr = document.createElement("tr");
+        tr.innerHTML = `<td>${r.date}</td><td>${r.start}</td><td>${r.end}</td><td>${r.name}</td><td>${r.station}</td><td>${r.code}</td>`;
+        tb.appendChild(tr);
+      });
+      $("#rowCount").textContent = parsedRows.length;
+      $("#btnPublish").disabled = parsedRows.length === 0;
+    }
+
+    // ---- Publication vers le Google Sheet via Apps Script ----
+    $("#btnPublish").addEventListener("click", async ()=>{
+      const targetStation = $("#targetStation").value.trim();
+      const errBox = $("#publishError"), okBox = $("#publishOk");
+      errBox.style.display = "none"; okBox.style.display = "none";
+
+      if(!targetStation){ errBox.textContent = "Indiquez la station cible."; errBox.style.display=""; return; }
+      if(!CONFIG.WEBAPP_URL){ errBox.textContent = "WEBAPP_URL non configuré dans config.js."; errBox.style.display=""; return; }
+
+      $("#publishStatus").textContent = "Publication en cours…";
+      $("#btnPublish").disabled = true;
+
+      const resp = await fetch(CONFIG.WEBAPP_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "uploadPlanning",
+          adminKey: CONFIG.ADMIN_KEY,
+          station: targetStation,
+          rows: parsedRows
+        })
+      }).then(r=>r.json()).catch(()=>null);
+
+      $("#publishStatus").textContent = "";
+      $("#btnPublish").disabled = false;
+
+      if(!resp || resp.ok === false){
+        errBox.textContent = "Erreur lors de la publication : " + (resp && resp.error ? resp.error : "vérifiez apps-script/Code.gs et le déploiement.");
+        errBox.style.display = "";
+        return;
+      }
+      okBox.textContent = `✅ ${resp.written || parsedRows.length} lignes publiées pour la station "${targetStation}".`;
+      okBox.style.display = "";
+    });
+  </script>
+</body>
+</html>
